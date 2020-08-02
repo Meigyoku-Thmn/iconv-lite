@@ -22,11 +22,13 @@ class Utf16LEEncoder {
         this.backend = backend;
     }
 
+    get hasState() {
+        return false;
+    }
+
     byteLength(str) {
         return str.length * 2;
     }
-
-    get hasState() { return false; }
 
     write(str) {
         const bytes = this.backend.allocBytes(str.length * 2);
@@ -37,7 +39,7 @@ class Utf16LEEncoder {
         return this.backend.bytesToResult(bytes, bytes.length);
     }
 
-    end() { }
+    end() {}
 }
 
 class Utf16LEDecoder {
@@ -168,11 +170,13 @@ class Utf16BEEncoder {
         this.backend = backend;
     }
 
+    get hasState() {
+        return false;
+    }
+
     byteLength(str) {
         return str.length * 2;
     }
-
-    get hasState() { return false; }
 
     write(str) {
         const bytes = this.backend.allocBytes(str.length * 2);
@@ -185,7 +189,7 @@ class Utf16BEEncoder {
         return this.backend.bytesToResult(bytes, bytesPos);
     }
 
-    end() { }
+    end() {}
 }
 
 class Utf16BEDecoder {

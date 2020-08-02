@@ -58,11 +58,13 @@ class SBCSEncoder {
         this.encodeBuf = codec.encodeBuf;
     }
 
+    get hasState() {
+        return false;
+    }
+
     byteLength(str) {
         return str.length;
     }
-
-    get hasState() { return false; }
 
     write(str) {
         const bytes = this.backend.allocBytes(str.length);
@@ -74,7 +76,7 @@ class SBCSEncoder {
         return this.backend.bytesToResult(bytes, bytes.length);
     }
 
-    end() { }
+    end() {}
 }
 
 class SBCSDecoder {
@@ -83,7 +85,9 @@ class SBCSDecoder {
         this.backend = backend;
     }
 
-    get hasState() { return false; }
+    get hasState() {
+        return false;
+    }
 
     write(buf) {
         // Strings are immutable in JS -> we use ucs2 buffer to speed up computations.
@@ -96,5 +100,5 @@ class SBCSDecoder {
         return this.backend.rawCharsToResult(chars, chars.length);
     }
 
-    end() { }
+    end() {}
 }

@@ -4,13 +4,18 @@ var Buffer = require("safer-buffer").Buffer;
 
 // == UTF32-LE/BE codec. ==========================================================
 
-exports._utf32 = Utf32Codec;
+class Utf32Codec {
+    constructor(codecOptions, iconv) {
+        this.encoder = Utf32Encoder;
+        this.decoder = Utf32Decoder;
 
-function Utf32Codec(codecOptions, iconv) {
-    this.iconv = iconv;
-    this.bomAware = true;
-    this.isLE = codecOptions.isLE;
+        this.iconv = iconv;
+        this.bomAware = true;
+        this.isLE = codecOptions.isLE;
+    }
 }
+
+exports._utf32 = Utf32Codec;
 
 exports.utf32le = { type: "_utf32", isLE: true };
 exports.utf32be = { type: "_utf32", isLE: false };
@@ -19,187 +24,189 @@ exports.utf32be = { type: "_utf32", isLE: false };
 exports.ucs4le = "utf32le";
 exports.ucs4be = "utf32be";
 
-Utf32Codec.prototype.encoder = Utf32Encoder;
-Utf32Codec.prototype.decoder = Utf32Decoder;
-
 // -- Encoding
 
-function Utf32Encoder(options, codec) {
-    this.isLE = codec.isLE;
-    this.highSurrogate = 0;
-}
+class Utf32Encoder {
+    constructor(options, codec) {
+        this.isLE = codec.isLE;
+        this.highSurrogate = 0;
+    }
 
-Object.defineProperty(Utf32Encoder.prototype, "hasState", {
-    get: function () {
+    get hasState() {
         return !!this.highSurrogate;
-    },
-});
+    }
 
-Utf32Encoder.prototype.write = function (str) {
-    var src = Buffer.from(str, "ucs2");
-    var dst = Buffer.alloc(src.length * 2);
-    var write32 = this.isLE ? dst.writeUInt32LE : dst.writeUInt32BE;
-    var offset = 0;
+    write(str) {
+        var src = Buffer.from(str, "ucs2");
+        var dst = Buffer.alloc(src.length * 2);
+        var write32 = this.isLE ? dst.writeUInt32LE : dst.writeUInt32BE;
+        var offset = 0;
 
-    for (var i = 0; i < src.length; i += 2) {
-        var code = src.readUInt16LE(i);
-        var isHighSurrogate = (0xd800 <= code && code < 0xdc00); // prettier-ignore
-        var isLowSurrogate = (0xdc00 <= code && code < 0xe000); // prettier-ignore
+        for (var i = 0; i < src.length; i += 2) {
+            var code = src.readUInt16LE(i);
+            var isHighSurrogate = (0xd800 <= code && code < 0xdc00); // prettier-ignore
+            var isLowSurrogate = (0xdc00 <= code && code < 0xe000); // prettier-ignore
 
-        if (this.highSurrogate) {
-            if (isHighSurrogate || !isLowSurrogate) {
-                // There shouldn't be two high surrogates in a row, nor a high surrogate which isn't followed by a low
-                // surrogate. If this happens, keep the pending high surrogate as a stand-alone semi-invalid character
-                // (technically wrong, but expected by some applications, like Windows file names).
-                write32.call(dst, this.highSurrogate, offset);
-                offset += 4;
+            if (this.highSurrogate) {
+                if (isHighSurrogate || !isLowSurrogate) {
+                    // There shouldn't be two high surrogates in a row, nor a high surrogate which isn't followed by a low
+                    // surrogate. If this happens, keep the pending high surrogate as a stand-alone semi-invalid character
+                    // (technically wrong, but expected by some applications, like Windows file names).
+                    write32.call(dst, this.highSurrogate, offset);
+                    offset += 4;
+                } else {
+                    // Create 32-bit value from high and low surrogates;
+                    var codepoint =
+                        (((this.highSurrogate - 0xd800) << 10) | (code - 0xdc00)) + 0x10000;
+
+                    write32.call(dst, codepoint, offset);
+                    offset += 4;
+                    this.highSurrogate = 0;
+
+                    continue;
+                }
+            }
+
+            if (isHighSurrogate) {
+                this.highSurrogate = code;
             } else {
-                // Create 32-bit value from high and low surrogates;
-                var codepoint = (((this.highSurrogate - 0xd800) << 10) | (code - 0xdc00)) + 0x10000;
-
-                write32.call(dst, codepoint, offset);
+                // Even if the current character is a low surrogate, with no previous high surrogate, we'll
+                // encode it as a semi-invalid stand-alone character for the same reasons expressed above for
+                // unpaired high surrogates.
+                write32.call(dst, code, offset);
                 offset += 4;
                 this.highSurrogate = 0;
-
-                continue;
             }
         }
 
-        if (isHighSurrogate) {
-            this.highSurrogate = code;
-        } else {
-            // Even if the current character is a low surrogate, with no previous high surrogate, we'll
-            // encode it as a semi-invalid stand-alone character for the same reasons expressed above for
-            // unpaired high surrogates.
-            write32.call(dst, code, offset);
-            offset += 4;
-            this.highSurrogate = 0;
-        }
+        if (offset < dst.length) dst = dst.slice(0, offset);
+
+        return dst;
     }
 
-    if (offset < dst.length) dst = dst.slice(0, offset);
+    byteLength(str) {
+        var byteLength = 0;
+        var currentHighSurrogate = 0;
 
-    return dst;
-};
+        for (var i = 0; i < str.length; i++) {
+            var code = str.charCodeAt(i);
+            var isHighSurrogate = (0xd800 <= code && code < 0xdc00); // prettier-ignore
+            var isLowSurrogate = (0xdc00 <= code && code < 0xe000); // prettier-ignore
 
-Utf32Encoder.prototype.byteLength = function (str) {
-    var byteLength = 0;
-    var currentHighSurrogate = 0;
+            if (currentHighSurrogate) {
+                if (isHighSurrogate || !isLowSurrogate) {
+                    byteLength += 4;
+                } else {
+                    byteLength += 4;
+                    currentHighSurrogate = 0;
+                    continue;
+                }
+            }
 
-    for (var i = 0; i < str.length; i++) {
-        var code = str.charCodeAt(i);
-        var isHighSurrogate = (0xd800 <= code && code < 0xdc00); // prettier-ignore
-        var isLowSurrogate = (0xdc00 <= code && code < 0xe000); // prettier-ignore
-
-        if (currentHighSurrogate) {
-            if (isHighSurrogate || !isLowSurrogate) {
-                byteLength += 4;
+            if (isHighSurrogate) {
+                currentHighSurrogate = code;
             } else {
                 byteLength += 4;
                 currentHighSurrogate = 0;
-                continue;
             }
         }
 
-        if (isHighSurrogate) {
-            currentHighSurrogate = code;
-        } else {
+        if (currentHighSurrogate) {
             byteLength += 4;
-            currentHighSurrogate = 0;
         }
+
+        return byteLength;
     }
 
-    if (currentHighSurrogate) {
-        byteLength += 4;
+    end() {
+        // Treat any leftover high surrogate as a semi-valid independent character.
+        if (!this.highSurrogate) {
+            return undefined;
+        }
+
+        var buf = Buffer.alloc(4);
+
+        if (this.isLE) buf.writeUInt32LE(this.highSurrogate, 0);
+        else buf.writeUInt32BE(this.highSurrogate, 0);
+
+        this.highSurrogate = 0;
+
+        return buf;
     }
-
-    return byteLength;
-};
-
-Utf32Encoder.prototype.end = function () {
-    // Treat any leftover high surrogate as a semi-valid independent character.
-    if (!this.highSurrogate) {
-        return undefined;
-    }
-
-    var buf = Buffer.alloc(4);
-
-    if (this.isLE) buf.writeUInt32LE(this.highSurrogate, 0);
-    else buf.writeUInt32BE(this.highSurrogate, 0);
-
-    this.highSurrogate = 0;
-
-    return buf;
-};
+}
 
 // -- Decoding
 
-function Utf32Decoder(options, codec) {
-    this.isLE = codec.isLE;
-    this.badChar = codec.iconv.defaultCharUnicode.charCodeAt(0);
-    this.overflow = [];
-}
+class Utf32Decoder {
+    constructor(options, codec) {
+        this.isLE = codec.isLE;
+        this.badChar = codec.iconv.defaultCharUnicode.charCodeAt(0);
+        this.overflow = [];
+    }
 
-Object.defineProperty(Utf32Decoder.prototype, "hasState", {
-    get: function () {
+    get hasState() {
         return this.overflow.length > 0;
-    },
-});
+    }
 
-Utf32Decoder.prototype.write = function (src) {
-    if (src.length === 0) return "";
+    write(src) {
+        if (src.length === 0) return "";
 
-    var i = 0;
-    var codepoint = 0;
-    var dst = Buffer.alloc(src.length + 4);
-    var offset = 0;
-    var isLE = this.isLE;
-    var overflow = this.overflow;
-    var badChar = this.badChar;
+        var i = 0;
+        var codepoint = 0;
+        var dst = Buffer.alloc(src.length + 4);
+        var offset = 0;
+        var isLE = this.isLE;
+        var overflow = this.overflow;
+        var badChar = this.badChar;
 
-    if (overflow.length > 0) {
-        for (; i < src.length && overflow.length < 4; i++) overflow.push(src[i]);
+        if (overflow.length > 0) {
+            for (; i < src.length && overflow.length < 4; i++) overflow.push(src[i]);
 
-        if (overflow.length === 4) {
-            // NOTE: codepoint is a signed int32 and can be negative.
-            // NOTE: We copied this block from below to help V8 optimize it (it works with array, not buffer).
-            if (isLE) {
-                codepoint =
-                    overflow[i] |
-                    (overflow[i + 1] << 8) |
-                    (overflow[i + 2] << 16) |
-                    (overflow[i + 3] << 24);
-            } else {
-                codepoint =
-                    overflow[i + 3] |
-                    (overflow[i + 2] << 8) |
-                    (overflow[i + 1] << 16) |
-                    (overflow[i] << 24);
+            if (overflow.length === 4) {
+                // NOTE: codepoint is a signed int32 and can be negative.
+                // NOTE: We copied this block from below to help V8 optimize it (it works with array, not buffer).
+                if (isLE) {
+                    codepoint =
+                        overflow[i] |
+                        (overflow[i + 1] << 8) |
+                        (overflow[i + 2] << 16) |
+                        (overflow[i + 3] << 24);
+                } else {
+                    codepoint =
+                        overflow[i + 3] |
+                        (overflow[i + 2] << 8) |
+                        (overflow[i + 1] << 16) |
+                        (overflow[i] << 24);
+                }
+                overflow.length = 0;
+
+                offset = _writeCodepoint(dst, offset, codepoint, badChar);
             }
-            overflow.length = 0;
+        }
 
+        // Main loop. Should be as optimized as possible.
+        for (; i < src.length - 3; i += 4) {
+            // NOTE: codepoint is a signed int32 and can be negative.
+            if (isLE) {
+                codepoint = src[i] | (src[i + 1] << 8) | (src[i + 2] << 16) | (src[i + 3] << 24);
+            } else {
+                codepoint = src[i + 3] | (src[i + 2] << 8) | (src[i + 1] << 16) | (src[i] << 24);
+            }
             offset = _writeCodepoint(dst, offset, codepoint, badChar);
         }
-    }
 
-    // Main loop. Should be as optimized as possible.
-    for (; i < src.length - 3; i += 4) {
-        // NOTE: codepoint is a signed int32 and can be negative.
-        if (isLE) {
-            codepoint = src[i] | (src[i + 1] << 8) | (src[i + 2] << 16) | (src[i + 3] << 24);
-        } else {
-            codepoint = src[i + 3] | (src[i + 2] << 8) | (src[i + 1] << 16) | (src[i] << 24);
+        // Keep overflowing bytes.
+        for (; i < src.length; i++) {
+            overflow.push(src[i]);
         }
-        offset = _writeCodepoint(dst, offset, codepoint, badChar);
+
+        return dst.slice(0, offset).toString("ucs2");
     }
 
-    // Keep overflowing bytes.
-    for (; i < src.length; i++) {
-        overflow.push(src[i]);
+    end() {
+        this.overflow.length = 0;
     }
-
-    return dst.slice(0, offset).toString("ucs2");
-};
+}
 
 function _writeCodepoint(dst, offset, codepoint, badChar) {
     // NOTE: codepoint is signed int32 and can be negative. We keep it that way to help V8 with optimizations.
@@ -227,10 +234,6 @@ function _writeCodepoint(dst, offset, codepoint, badChar) {
     return offset;
 }
 
-Utf32Decoder.prototype.end = function () {
-    this.overflow.length = 0;
-};
-
 // == UTF-32 Auto codec =============================================================
 // Decoder chooses automatically from UTF-32LE and UTF-32BE using BOM and space-based heuristic.
 // Defaults to UTF-32LE. http://en.wikipedia.org/wiki/UTF-32
@@ -238,103 +241,105 @@ Utf32Decoder.prototype.end = function () {
 
 // Encoder prepends BOM (which can be overridden with (addBOM: false}).
 
+class Utf32AutoCodec {
+    constructor(options, iconv) {
+        this.encoder = Utf32AutoEncoder;
+        this.decoder = Utf32AutoDecoder;
+
+        this.iconv = iconv;
+    }
+}
+
 exports.utf32 = Utf32AutoCodec;
 exports.ucs4 = "utf32";
 
-function Utf32AutoCodec(options, iconv) {
-    this.iconv = iconv;
-}
-
-Utf32AutoCodec.prototype.encoder = Utf32AutoEncoder;
-Utf32AutoCodec.prototype.decoder = Utf32AutoDecoder;
-
 // -- Encoding
 
-function Utf32AutoEncoder(options, codec) {
-    options = options || {};
+class Utf32AutoEncoder {
+    constructor(options, codec) {
+        options = options || {};
 
-    if (options.addBOM === undefined) options.addBOM = true;
+        if (options.addBOM === undefined) options.addBOM = true;
 
-    this.encoder = codec.iconv.getEncoder(options.defaultEncoding || "utf-32le", options);
-}
+        this.encoder = codec.iconv.getEncoder(options.defaultEncoding || "utf-32le", options);
+    }
 
-Object.defineProperty(Utf32AutoEncoder.prototype, "hasState", {
-    get: function () {
+    get hasState() {
         return this.encoder.hasState;
-    },
-});
+    }
 
-Utf32AutoEncoder.prototype.byteLength = function (str) {
-    return this.encoder.byteLength(str);
-};
+    byteLength(str) {
+        return this.encoder.byteLength(str);
+    }
 
-Utf32AutoEncoder.prototype.write = function (str) {
-    return this.encoder.write(str);
-};
+    write(str) {
+        return this.encoder.write(str);
+    }
 
-Utf32AutoEncoder.prototype.end = function () {
-    return this.encoder.end();
-};
+    end() {
+        return this.encoder.end();
+    }
+}
 
 // -- Decoding
 
-function Utf32AutoDecoder(options, codec) {
-    this.decoder = null;
-    this.initialBufs = [];
-    this.initialBufsLen = 0;
-    this.options = options || {};
-    this.iconv = codec.iconv;
-}
+class Utf32AutoDecoder {
+    constructor(options, codec) {
+        this.decoder = null;
+        this.initialBufs = [];
+        this.initialBufsLen = 0;
+        this.options = options || {};
+        this.iconv = codec.iconv;
+    }
 
-Object.defineProperty(Utf32AutoDecoder.prototype, "hasState", {
-    get: function () {
+    get hasState() {
         return this.initialBufsLen !== 0 || (this.decoder != null && this.decoder.hasState);
-    },
-});
-
-Utf32AutoDecoder.prototype.write = function (buf) {
-    if (!this.decoder) {
-        // Codec is not chosen yet. Accumulate initial bytes.
-        this.initialBufs.push(buf);
-        this.initialBufsLen += buf.length;
-
-        if (this.initialBufsLen < 32)
-            // We need more bytes to use space heuristic (see below)
-            return "";
-
-        // We have enough bytes -> detect endianness.
-        var encoding = detectEncoding(this.initialBufs, this.options.defaultEncoding);
-        this.decoder = this.iconv.getDecoder(encoding, this.options);
-
-        var resStr = "";
-        for (var i = 0; i < this.initialBufs.length; i++)
-            resStr += this.decoder.write(this.initialBufs[i]);
-
-        this.initialBufs.length = this.initialBufsLen = 0;
-        return resStr;
     }
 
-    return this.decoder.write(buf);
-};
+    write(buf) {
+        if (!this.decoder) {
+            // Codec is not chosen yet. Accumulate initial bytes.
+            this.initialBufs.push(buf);
+            this.initialBufsLen += buf.length;
 
-Utf32AutoDecoder.prototype.end = function () {
-    if (!this.decoder) {
-        var encoding = detectEncoding(this.initialBufs, this.options.defaultEncoding);
-        this.decoder = this.iconv.getDecoder(encoding, this.options);
+            if (this.initialBufsLen < 32)
+                // We need more bytes to use space heuristic (see below)
+                return "";
 
-        var resStr = "";
-        for (var i = 0; i < this.initialBufs.length; i++)
-            resStr += this.decoder.write(this.initialBufs[i]);
+            // We have enough bytes -> detect endianness.
+            var encoding = detectEncoding(this.initialBufs, this.options.defaultEncoding);
+            this.decoder = this.iconv.getDecoder(encoding, this.options);
 
-        var trail = this.decoder.end();
-        if (trail) resStr += trail;
+            var resStr = "";
+            for (var i = 0; i < this.initialBufs.length; i++)
+                resStr += this.decoder.write(this.initialBufs[i]);
 
-        this.initialBufs.length = this.initialBufsLen = 0;
-        return resStr;
+            this.initialBufs.length = this.initialBufsLen = 0;
+            return resStr;
+        }
+
+        return this.decoder.write(buf);
     }
 
-    return this.decoder.end();
-};
+    end() {
+        if (!this.decoder) {
+            var encoding = detectEncoding(this.initialBufs, this.options.defaultEncoding);
+            this.decoder = this.iconv.getDecoder(encoding, this.options);
+
+            var resStr = "";
+            for (var i = 0; i < this.initialBufs.length; i++)
+                resStr += this.decoder.write(this.initialBufs[i]);
+
+            var trail = this.decoder.end();
+            if (trail) resStr += trail;
+
+            this.initialBufs.length = this.initialBufsLen = 0;
+            return resStr;
+        }
+
+        return this.decoder.end();
+    }
+}
 
 function detectEncoding(bufs, defaultEncoding) {
     var b = [];
