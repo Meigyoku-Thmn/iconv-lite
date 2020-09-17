@@ -1,3 +1,5 @@
+**Warning:** This package is a fork from an old version of iconv-lite and is supposed to be used internally by CSBinary only, it's not supposed to be used publicly. Please navigate to https://www.npmjs.com/package/iconv-lite to use the lastest version of iconv-lite.
+
 ## iconv-lite: Pure JS character encoding conversion
 
 -   No need for native code compilation. Quick to install, works on Windows and in sandboxed environments like [Cloud9](http://c9.io).
