@@ -1,5 +1,5 @@
 {
-    "name": "iconv-lite",
+    "name": "@meigyokuthmn/iconv-lite",
     "description": "Convert character encodings in pure javascript.",
     "version": "0.7.0-pre",
     "license": "MIT",
@@ -9,14 +9,14 @@
         "charset",
         "icu"
     ],
-    "author": "Alexander Shtuchkin <ashtuchkin@gmail.com>",
+    "author": "Meigyoku Thmn",
     "main": "./lib/index-node.js",
     "typings": "./lib/index.d.ts",
-    "homepage": "https://github.com/ashtuchkin/iconv-lite",
-    "bugs": "https://github.com/ashtuchkin/iconv-lite/issues",
+    "homepage": "https://github.com/Meigyoku-Thmn/iconv-lite",
+    "bugs": "https://github.com/Meigyoku-Thmn/iconv-lite/issues",
     "repository": {
         "type": "git",
-        "url": "git://github.com/ashtuchkin/iconv-lite.git"
+        "url": "git://github.com/Meigyoku-Thmn/iconv-lite.git"
     },
     "engines": {
         "node": ">=4.5.0 <5.0.0 || >=5.10.0"
